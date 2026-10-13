@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Soil Moisture Monitor</title>
+<style>
+  :root {
+    --bg: #f4f6f1; --card: #ffffff; --ink: #1f2a1f; --muted: #6b776b; --line: #e1e6dc;
+    --accent: #2f7d4f; --dry: #d9822b; --ok: #2f7d4f; --wet: #2b7bb9; --grid: #e6ebe1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121712; --card: #1b221b; --ink: #e8efe6; --muted: #92a092; --line: #2a342a;
+            --accent: #5cc184; --dry: #f0a04f; --ok: #5cc184; --wet: #5aaee8; --grid: #263026; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 16px; }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  h1 { font-size: 20px; margin: 0; }
+  .status { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #999; }
+  .dot.on { background: var(--ok); box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 25%, transparent); }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(12, 1fr); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+  .c-gauge { grid-column: span 4; } .c-chart { grid-column: span 8; }
+  .c-stats { grid-column: span 12; } .c-ctrl { grid-column: span 6; } .c-log { grid-column: span 6; }
+  @media (max-width: 800px) { .c-gauge, .c-chart, .c-ctrl, .c-log { grid-column: span 12; } }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  .gauge { position: relative; text-align: center; }
+  .gauge svg { width: 100%; max-width: 280px; }
+  .gauge .val { position: absolute; left: 0; right: 0; top: 52%; }
+  .gauge .val b { font-size: 44px; font-variant-numeric: tabular-nums; }
+  .gauge .val span { display: block; color: var(--muted); font-size: 13px; }
+  .badge { display: inline-block; margin-top: 6px; padding: 4px 12px; border-radius: 999px; font-weight: 600; font-size: 13px; color: #fff; background: #888; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; }
+  .stat { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .stat small { color: var(--muted); display: block; font-size: 12px; }
+  .stat b { font-size: 22px; font-variant-numeric: tabular-nums; }
+  canvas { width: 100%; height: 260px; display: block; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 10px; }
+  label { font-size: 13px; color: var(--muted); }
+  input, select { background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; font: inherit; }
+  input[type=number] { width: 90px; } input[type=text] { flex: 1; min-width: 160px; }
+  button { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+  button.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .log { max-height: 230px; overflow: auto; font-size: 13px; font-variant-numeric: tabular-nums; }
+  .log div { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--line); }
+  .log .alert { color: var(--dry); font-weight: 600; }
+  .note { font-size: 12px; color: var(--muted); margin: 6px 0 0; }
+  #warn { display: none; background: color-mix(in srgb, var(--dry) 18%, var(--card)); border: 1px solid var(--dry); border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🌱 Soil Moisture Monitor</h1>
+    <div class="status"><span class="dot" id="dot"></span><span id="conn">Not connected</span></div>
+  </header>
+
+  <div id="warn">Web Serial isn't available in this browser. Open this file in desktop <b>Chrome</b> or <b>Edge</b> to connect by USB, or use the Wi-Fi (HTTP) or Demo options.</div>
+
+  <div class="grid">
+    <section class="card c-gauge">
+      <h2>Current moisture</h2>
+      <div class="gauge">
+        <svg viewBox="0 0 200 120">
+          <path d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke="var(--grid)" stroke-width="16" stroke-linecap="round" pathLength="100"/>
+          <path id="arc" d="M20 100 A80 80 0 0 1 180 100" fill="none" stroke="var(--ok)" stroke-width="16" stroke-linecap="round" pathLength="100" stroke-dasharray="0 100"/>
+        </svg>
+        <div class="val"><b id="pct">--</b><b style="font-size:20px">%</b><span id="raw">raw: --</span></div>
+        <span class="badge" id="badge">No data</span>
+      </div>
+    </section>
+
+    <section class="card c-chart">
+      <h2>Live readings</h2>
+      <canvas id="chart"></canvas>
+    </section>
+
+    <section class="card c-stats">
+      <div class="stats">
+        <div class="stat"><small>Average</small><b id="s-avg">--</b></div>
+        <div class="stat"><small>Minimum</small><b id="s-min">--</b></div>
+        <div class="stat"><small>Maximum</small><b id="s-max">--</b></div>
+        <div class="stat"><small>Readings</small><b id="s-n">0</b></div>
+        <div class="stat"><small>Last update</small><b id="s-t" style="font-size:16px">--</b></div>
+      </div>
+    </section>
+
+    <section class="card c-ctrl">
+      <h2>Connection</h2>
+      <div class="row">
+        <button id="btnSerial">Connect USB sensor</button>
+        <label>Baud <select id="baud"><option>9600</option><option>115200</option></select></label>
+        <button class="ghost" id="btnDemo">Start demo</button>
+        <button class="ghost" id="btnStop" disabled>Disconnect</button>
+      </div>
+      <div class="row">
+        <input type="text" id="url" placeholder="ESP32 Wi-Fi: http://192.168.1.50/data">
+        <button class="ghost" id="btnHttp">Poll URL</button>
+      </div>
+      <p class="note">Sensor can print a plain number (<code>512</code>), <code>raw=512</code>, or JSON like <code>{"raw":512}</code> once per line.</p>
+
+      <h2 style="margin-top:16px">Calibration &amp; alerts</h2>
+      <div class="row">
+        <label>Dry (air) <input type="number" id="calDry"></label>
+        <label>Wet (water) <input type="number" id="calWet"></label>
+        <button class="ghost" id="setDry">Use current as dry</button>
+        <button class="ghost" id="setWet">Use current as wet</button>
+      </div>
+      <div class="row">
+        <label>Dry below <input type="number" id="thLow" min="0" max="100">%</label>
+        <label>Wet above <input type="number" id="thHigh" min="0" max="100">%</label>
+      </div>
+      <p class="note">Hold the sensor in open air, press “Use current as dry”; then in a glass of water, press “Use current as wet”.</p>
+    </section>
+
+    <section class="card c-log">
+      <h2>Events</h2>
+      <div class="row">
+        <button class="ghost" id="btnCsv">Export CSV</button>
+        <button class="ghost" id="btnClear">Clear data</button>
+      </div>
+      <div class="log" id="log"></div>
+    </section>
+  </div>
+</div>
+
+<script>
+(function () {
+  const $ = id => document.getElementById(id);
+  const MAX_POINTS = 300;
+  let readings = [];            // {t, raw, pct}
+  let lastRaw = null, lastZone = null;
+  let port = null, reader = null, closing = false;
+  let demoTimer = null, httpTimer = null;
+
+  // ---------- settings ----------
+  const defaults = { dry: 520, wet: 260, low: 30, high: 70 };
+  let cfg = Object.assign({}, defaults);
+  try { Object.assign(cfg, JSON.parse(localStorage.getItem('soilcfg') || '{}')); } catch (e) {}
+  function saveCfg() { try { localStorage.setItem('soilcfg', JSON.stringify(cfg)); } catch (e) {} }
+  function loadInputs() {
+    $('calDry').value = cfg.dry; $('calWet').value = cfg.wet;
+    $('thLow').value = cfg.low; $('thHigh').value = cfg.high;
+  }
+  function readInputs() {
+    cfg.dry = +$('calDry').value; cfg.wet = +$('calWet').value;
+    cfg.low = +$('thLow').value; cfg.high = +$('thHigh').value;
+    saveCfg(); if (readings.length) recompute();
+  }
+  ['calDry', 'calWet', 'thLow', 'thHigh'].forEach(id => $(id).addEventListener('change', readInputs));
+  $('setDry').onclick = () => { if (lastRaw != null) { $('calDry').value = lastRaw; readInputs(); } };
+  $('setWet').onclick = () => { if (lastRaw != null) { $('calWet').value = lastRaw; readInputs(); } };
+  loadInputs();
+
+  // ---------- helpers ----------
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  function toPct(raw) {
+    if (cfg.dry === cfg.wet) return 0;
+    return clamp((cfg.dry - raw) / (cfg.dry - cfg.wet) * 100, 0, 100);
+  }
+  function zone(p) { return p < cfg.low ? 'dry' : p > cfg.high ? 'wet' : 'ok'; }
+  const zoneInfo = {
+    dry: { text: 'Dry – needs water', color: 'var(--dry)' },
+    ok:  { text: 'Optimal',           color: 'var(--ok)' },
+    wet: { text: 'Too wet',           color: 'var(--wet)' }
+  };
+  const fmtTime = d => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  function parseLine(line) {
+    line = line.trim(); if (!line) return null;
+    if (line[0] === '{') {
+      try {
+        const o = JSON.parse(line);
+        const v = o.raw ?? o.value ?? o.moisture ?? o.soil;
+        if (typeof v === 'number') return v;
+      } catch (e) {}
+    }
+    const m = line.match(/-?\d+(\.\d+)?/);
+    return m ? parseFloat(m[0]) : null;
+  }
+
+  function log(msg, alert) {
+    const el = document.createElement('div');
+    if (alert) el.className = 'alert';
+    el.innerHTML = '<span></span><span>' + fmtTime(new Date()) + '</span>';
+    el.firstChild.textContent = msg;
+    $('log').prepend(el);
+    while ($('log').children.length > 60) $('log').lastChild.remove();
+  }
+
+  // ---------- data ingest ----------
+  function addReading(raw) {
+    lastRaw = raw;
+    const p = toPct(raw);
+    readings.push({ t: Date.now(), raw, pct: p });
+    if (readings.length > 5000) readings.shift();
+    const z = zone(p);
+    if (z !== lastZone) {
+      if (lastZone !== null || z !== 'ok') log(zoneInfo[z].text + ' (' + p.toFixed(0) + '%)', z !== 'ok');
+      lastZone = z;
+    }
+    render();
+  }
+  function recompute() {
+    readings.forEach(r => r.pct = toPct(r.raw));
+    render();
+  }
+
+  // ---------- render ----------
+  function render() {
+    const r = readings[readings.length - 1];
+    if (!r) return;
+    $('pct').textContent = r.pct.toFixed(0);
+    $('raw').textContent = 'raw: ' + r.raw;
+    $('arc').setAttribute('stroke-dasharray', r.pct.toFixed(1) + ' 100');
+    const z = zoneInfo[zone(r.pct)];
+    $('arc').setAttribute('stroke', z.color);
+    $('badge').textContent = z.text; $('badge').style.background = z.color;
+    const ps = readings.map(x => x.pct);
+    $('s-avg').textContent = (ps.reduce((a, b) => a + b, 0) / ps.length).toFixed(1) + '%';
+    $('s-min').textContent = Math.min(...ps).toFixed(0) + '%';
+    $('s-max').textContent = Math.max(...ps).toFixed(0) + '%';
+    $('s-n').textContent = readings.length;
+    $('s-t').textContent = fmtTime(new Date(r.t));
+    drawChart();
+  }
+
+  function drawChart() {
+    const cv = $('chart'), dpr = window.devicePixelRatio || 1;
+    const w = cv.clientWidth, h = cv.clientHeight;
+    cv.width = w * dpr; cv.height = h * dpr;
+    const c = cv.getContext('2d'); c.scale(dpr, dpr);
+    const css = getComputedStyle(document.documentElement);
+    const grid = css.getPropertyValue('--grid').trim(), muted = css.getPropertyValue('--muted').trim();
+    const accent = css.getPropertyValue('--accent').trim();
+    const L = 34, R = 8, T = 8, B = 20, pw = w - L - R, ph = h - T - B;
+    c.clearRect(0, 0, w, h);
+    c.font = '11px system-ui'; c.fillStyle = muted; c.strokeStyle = grid; c.lineWidth = 1;
+    for (let v = 0; v <= 100; v += 25) {
+      const y = T + ph - v / 100 * ph;
+      c.beginPath(); c.moveTo(L, y); c.lineTo(w - R, y); c.stroke();
+      c.fillText(v + '%', 2, y + 4);
+    }
+    // threshold lines
+    c.setLineDash([4, 4]);
+    [[cfg.low, '--dry'], [cfg.high, '--wet']].forEach(([v, col]) => {
+      c.strokeStyle = css.getPropertyValue(col).trim();
+      const y = T + ph - v / 100 * ph;
+      c.beginPath(); c.moveTo(L, y); c.lineTo(w - R, y); c.stroke();
+    });
+    c.setLineDash([]);
+    const pts = readings.slice(-MAX_POINTS);
+    if (pts.length < 2) return;
+    c.strokeStyle = accent; c.lineWidth = 2; c.beginPath();
+    pts.forEach((p, i) => {
+      const x = L + i / (MAX_POINTS - 1) * pw + (MAX_POINTS - pts.length) / (MAX_POINTS - 1) * pw;
+      const y = T + ph - p.pct / 100 * ph;
+      i ? c.lineTo(x, y) : c.moveTo(x, y);
+    });
+    c.stroke();
+    c.fillStyle = muted;
+    c.fillText(fmtTime(new Date(pts[0].t)), L, h - 4);
+    const lastLabel = fmtTime(new Date(pts[pts.length - 1].t));
+    c.fillText(lastLabel, w - R - c.measureText(lastLabel).width, h - 4);
+  }
+  window.addEventListener('resize', drawChart);
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', drawChart);
+
+  // ---------- connection state ----------
+  function setConn(on, text) {
+    $('dot').classList.toggle('on', on);
+    $('conn').textContent = text;
+    $('btnStop').disabled = !on;
+    $('btnSerial').disabled = on; $('btnDemo').disabled = on; $('btnHttp').disabled = on;
+  }
+
+  // ---------- Web Serial ----------
+  if (!('serial' in navigator)) { $('warn').style.display = 'block'; $('btnSerial').disabled = true; }
+
+  $('btnSerial').onclick = async () => {
+    try {
+      port = await navigator.serial.requestPort();
+      await port.open({ baudRate: +$('baud').value });
+      closing = false;
+      setConn(true, 'Connected via USB');
+      log('Sensor connected');
+      readLoop();
+    } catch (e) { log('Connection failed: ' + e.message, true); setConn(false, 'Not connected'); }
+  };
+
+  async function readLoop() {
+    const decoder = new TextDecoderStream();
+    const closed = port.readable.pipeTo(decoder.writable).catch(() => {});
+    reader = decoder.readable.getReader();
+    let buf = '';
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += value;
+        let i;
+        while ((i = buf.indexOf('\n')) >= 0) {
+          const v = parseLine(buf.slice(0, i)); buf = buf.slice(i + 1);
+          if (v != null) addReading(v);
+        }
+        if (buf.length > 500) buf = '';
+      }
+    } catch (e) { if (!closing) log('Read error: ' + e.message, true); }
+    try { reader.releaseLock(); } catch (e) {}
+    await closed;
+    try { await port.close(); } catch (e) {}
+    port = null; setConn(false, 'Not connected');
+  }
+
+  // ---------- HTTP polling (ESP32 over Wi-Fi) ----------
+  $('btnHttp').onclick = () => {
+    const url = $('url').value.trim(); if (!url) { $('url').focus(); return; }
+    setConn(true, 'Polling ' + url); log('Polling started');
+    const poll = async () => {
+      try {
+        const res = await fetch(url, { cache: 'no-store' });
+        const v = parseLine(await res.text());
+        if (v != null) addReading(v);
+      } catch (e) { log('Request failed: ' + e.message, true); }
+    };
+    poll(); httpTimer = setInterval(poll, 2000);
+  };
+
+  // ---------- Demo ----------
+  $('btnDemo').onclick = () => {
+    setConn(true, 'Demo mode (simulated data)'); log('Demo started');
+    let moist = 60, t = 0;
+    demoTimer = setInterval(() => {
+      t++; moist -= 0.35 + Math.random() * 0.2;
+      if (moist < 15) moist = 85;                        // "watering"
+      const p = clamp(moist + Math.sin(t / 5) * 1.5, 0, 100);
+      addReading(Math.round(cfg.dry - p / 100 * (cfg.dry - cfg.wet)));
+    }, 700);
+  };
+
+  $('btnStop').onclick = async () => {
+    closing = true;
+    if (demoTimer) { clearInterval(demoTimer); demoTimer = null; }
+    if (httpTimer) { clearInterval(httpTimer); httpTimer = null; }
+    if (reader) { try { await reader.cancel(); } catch (e) {} }
+    setConn(false, 'Not connected'); log('Disconnected');
+  };
+
+  // ---------- export / clear ----------
+  $('btnCsv').onclick = () => {
+    if (!readings.length) return;
+    const rows = ['timestamp,raw,moisture_percent'].concat(
+      readings.map(r => new Date(r.t).toISOString() + ',' + r.raw + ',' + r.pct.toFixed(1)));
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([rows.join('\n')], { type: 'text/csv' }));
+    a.download = 'soil-moisture-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.csv';
+    a.click(); URL.revokeObjectURL(a.href);
+  };
+  $('btnClear').onclick = () => {
+    readings = []; lastZone = null; lastRaw = null;
+    ['pct', 's-avg', 's-min', 's-max', 's-t'].forEach(id => $(id).textContent = '--');
+    $('s-n').textContent = '0'; $('raw').textContent = 'raw: --';
+    $('arc').setAttribute('stroke-dasharray', '0 100');
+    $('badge').textContent = 'No data'; $('badge').style.background = '#888';
+    $('log').innerHTML = ''; drawChart();
+  };
+
+  drawChart();
+})();
+</script>
+</body>
+</html>
